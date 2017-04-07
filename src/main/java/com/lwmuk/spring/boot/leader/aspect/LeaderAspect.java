@@ -9,7 +9,6 @@ import org.aspectj.lang.annotation.Aspect;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.Closeable;
@@ -22,18 +21,23 @@ import java.io.Closeable;
 public class LeaderAspect extends LeaderSelectorListenerAdapter implements Closeable {
 
     private static final Logger log = LoggerFactory.getLogger(LeaderAspect.class);
+    // 领导任期，这里为了测试设为2秒，真实环境下可以设为Long.MAX_VALUE
+    private static final long TENURE_MS = 2000L;
+    // 执行选举算法的根路径
+    private static final String ELECTION_ROOT = "/election";
 
     private volatile boolean isLeader = false;
+    private final LeaderSelector selector;
 
     @Autowired
-    public LeaderAspect(CuratorFramework client, @Value("${election.path}") String path) {
-        LeaderSelector selector = new LeaderSelector(client, path, this);
+    public LeaderAspect(CuratorFramework client) {
+        selector = new LeaderSelector(client, ELECTION_ROOT, this);
         selector.autoRequeue();
         selector.start();
     }
 
     /**
-     * 执行该方法，为获得领导权，退出该方法，为失去领导权
+     * 执行该方法，为获得领导权，退出该方法，为撤销领导权
      */
     public void takeLeadership(CuratorFramework cf) {
         // 获得领导权
@@ -42,31 +46,34 @@ public class LeaderAspect extends LeaderSelectorListenerAdapter implements Close
 
         // 一直沉睡，保持住领导权
         try {
-            Thread.sleep(Long.MAX_VALUE);
+            Thread.sleep(TENURE_MS);
         } catch (InterruptedException ex) {
             // nothing to do
         }
 
-        // 执行到这一步，将失去领导权
-        close();
+        // 执行到这一步，将撤销领导权
+        revokeLeadership();
     }
 
-    @Override
-    public void close() {
-        // 失去领导权
+    private void revokeLeadership() {
         isLeader = false;
         log.info("Leadership revoked.");
     }
 
-    @Around("@annotation(com.zhyt.service.center.annotation.LeaderOnly)")
-    public void onlyExecutionForLeader(ProceedingJoinPoint joinPoint) {
+    @Override
+    public void close() {
+        revokeLeadership();
+    }
+
+    @Around("@annotation(com.lwmuk.spring.boot.leader.annotation.LeaderOnly)")
+    public void onlyExecuteForLeader(ProceedingJoinPoint joinPoint) {
         if (!isLeader) {
             log.debug("I'm not leader, skip leader-only tasks.");
             return;
         }
 
-        log.debug("I'm leader, execute leader-only tasks.");
         try {
+            log.debug("I'm leader, execute leader-only tasks.");
             joinPoint.proceed();
         } catch (Throwable ex) {
             log.error(ex.getMessage());
