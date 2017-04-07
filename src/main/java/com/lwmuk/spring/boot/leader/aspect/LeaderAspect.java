@@ -44,7 +44,7 @@ public class LeaderAspect extends LeaderSelectorListenerAdapter implements Close
         isLeader = true;
         log.info("Leadership granted.");
 
-        // 一直沉睡，保持住领导权
+        // 沉睡，保持住领导权
         try {
             Thread.sleep(TENURE_MS);
         } catch (InterruptedException ex) {
